@@ -58,7 +58,8 @@ body {
   padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
 }
-.pagina { max-width: 880px; margin: 0 auto; display: grid; gap: 28px; }
+.pagina { max-width: 880px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
+header, .parte, .edicao, .bloco, details { min-width: 0; }
 
 header { display: grid; gap: 14px; }
 h1 {
