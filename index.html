@@ -157,6 +157,19 @@ pre {
 .t-mnem { color: var(--h-mnem); } .t-reg { color: var(--h-reg); } .t-num { color: var(--h-num); }
 .t-str { color: var(--h-str); } .t-com { color: var(--h-com); font-style: italic; } .t-rot { color: var(--h-rot); font-weight: 600; } .t-dir { color: var(--h-dir); }
 
+.acoes { display: flex; gap: 8px; flex-wrap: wrap; }
+.botao {
+  font: 600 13px/1 var(--f-texto);
+  padding: 9px 14px; border-radius: 7px;
+  border: 1px solid var(--linha);
+  background: var(--chao); color: var(--tinta);
+  text-decoration: none; cursor: pointer;
+}
+.botao:hover { border-color: var(--tinta-2); }
+.botao.principal { background: var(--tinta); color: var(--papel); border-color: var(--tinta); }
+.botao:focus-visible { outline: 2px solid var(--n1); outline-offset: 2px; }
+.esperando { font-size: 13px; color: var(--andamento); align-self: center; }
+
 .teste {
   border-left: 3px solid var(--n2);
   padding: 2px 0 2px 12px;
@@ -184,7 +197,7 @@ details[open] summary { margin-bottom: 10px; }
     <p class="sub">O que falta no <code>src/main.asm</code>, parte por parte, com o código e onde colar. Cada parte entra em cima do código da anterior, então sigam a ordem dos números.</p>
     <div class="tabuleiro" id="tabuleiro" aria-label="Partes feitas"></div>
     <div class="como">
-      <p>Pegou uma parte? Reaja com 👀 na issue dela. Subiu no repositório? Reaja com 🚀 ou feche a issue.</p>
+      <p>Pegou uma parte ou terminou? Use os botões dela. Eles abrem o GitHub com o aviso pronto; é só clicar em <strong>Create</strong>, e esta página atualiza sozinha em alguns segundos.</p>
       <p class="erro-status" id="erro-status" hidden></p>
     </div>
   </header>
@@ -240,6 +253,7 @@ function desenhar() {
         ${p.issue ? `<a class="issue-link" href="https://github.com/${REPO}/issues/${p.issue}" target="_blank" rel="noopener">Issue #${p.issue}</a>` : ''}
         <span data-quem="${p.id}"></span>
       </div>
+      <div class="acoes" data-acoes="${p.id}"></div>
       ${p.edicoes.map((e, i) => `
         <div class="edicao">
           <div class="onde">${comCodigo(e.onde)}</div>
@@ -275,15 +289,35 @@ document.addEventListener('click', async ev => {
 
 function situacao(issue) {
   if (!issue) return { classe: 'livre', texto: 'Livre', quem: '' };
-  const r = issue.reactions || {};
-  const quem = (issue.assignees || []).map(a => a.login).join(', ');
-  if (issue.state === 'closed' || r.rocket > 0) return { classe: 'feita', texto: 'Feita', quem };
-  if (quem || r.eyes > 0) return { classe: 'andamento', texto: 'Em andamento', quem };
+  const rotulos = (issue.labels || []).map(l => l.name);
+  const quem = rotulos.filter(n => n.startsWith('com-')).map(n => n.slice(4)).join(', ');
+  if (issue.state === 'closed') return { classe: 'feita', texto: 'Feita', quem };
+  if (rotulos.includes('andamento')) return { classe: 'andamento', texto: 'Em andamento', quem };
   return { classe: 'livre', texto: 'Livre', quem: '' };
+}
+
+const aguardando = {};
+
+function linkAviso(acao, p) {
+  const titulo = encodeURIComponent(`${acao} ${p.n}`);
+  const corpo = encodeURIComponent(`Parte ${p.n}: ${p.titulo}`);
+  return `https://github.com/${REPO}/issues/new?title=${titulo}&body=${corpo}`;
+}
+
+function botoes(p, s) {
+  const b = (acao, rotulo, principal) =>
+    `<a class="botao${principal ? ' principal' : ''}" href="${linkAviso(acao, p)}" target="_blank" rel="noopener" data-acao="${acao}" data-parte="${p.id}">${rotulo}</a>`;
+  let html = '';
+  if (s.classe === 'livre') html = b('peguei', 'Peguei', true) + b('terminei', 'Terminei', false);
+  if (s.classe === 'andamento') html = b('terminei', 'Terminei', true) + b('livre', 'Largar', false);
+  if (s.classe === 'feita') html = b('livre', 'Reabrir', false);
+  if (aguardando[p.id]) html += '<span class="esperando">Esperando o GitHub confirmar…</span>';
+  return html;
 }
 
 function aplicar(issues) {
   const porNumero = Object.fromEntries(issues.map(i => [i.number, i]));
+  ultimoEstado = porNumero;
   let feitas = 0;
   const estado = {};
   for (const p of PARTES) {
@@ -293,7 +327,9 @@ function aplicar(issues) {
     const selo = document.querySelector(`[data-selo="${p.id}"]`);
     selo.className = 'selo ' + s.classe;
     selo.textContent = s.texto;
-    document.querySelector(`[data-quem="${p.id}"]`).textContent = s.quem ? 'Com ' + s.quem : '';
+    document.querySelector(`[data-quem="${p.id}"]`).textContent = s.quem ? (s.classe === 'feita' ? 'Feita por ' : 'Com ') + s.quem : '';
+    if (aguardando[p.id] && aguardando[p.id] !== s.classe + s.quem) delete aguardando[p.id];
+    document.querySelector(`[data-acoes="${p.id}"]`).innerHTML = botoes(p, s);
   }
   document.querySelectorAll('[data-casa], [data-dep]').forEach(el => {
     const id = el.dataset.casa || el.dataset.dep;
@@ -324,8 +360,34 @@ async function carregar() {
   }
 }
 
+let ultimoEstado = {};
+
+document.addEventListener('click', ev => {
+  const a = ev.target.closest('[data-acao]');
+  if (!a) return;
+  const p = PARTES.find(x => x.id === a.dataset.parte);
+  const s = situacao(ultimoEstado[p.issue]);
+  aguardando[p.id] = s.classe + s.quem;
+  setTimeout(() => aplicar(Object.values(ultimoEstado)), 0);
+  rapido = 12;
+  agendar();
+});
+
+let rapido = 0, timer = null;
+function agendar() {
+  clearTimeout(timer);
+  const espera = rapido > 0 ? 10000 : 90000;
+  timer = setTimeout(async () => {
+    if (rapido > 0) rapido--;
+    if (!document.hidden) await carregar();
+    agendar();
+  }, espera);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { carregar(); agendar(); } });
+
 desenhar();
 carregar();
+agendar();
 </script>
 </body>
 </html>
